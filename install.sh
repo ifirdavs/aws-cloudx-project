@@ -1,10 +1,10 @@
 #!/bin/bash
 
 yum update -y
-yum install git -y
 
-git clone https://github.com/ifirdavs/aws-cloudx-project ./project
-cd ./project
+mkdir ~/project
+aws s3 cp s3://firdavsbekbucket1/project/ ~/project --recursive
+cd ~/project
 
 python3 -m venv .venv
 source .venv/bin/activate
