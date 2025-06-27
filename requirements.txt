@@ -1,3 +1,7 @@
 fastapi
 uvicorn
 requests
+sqlalchemy
+psycopg2-binary
+python-multipart
+boto3
