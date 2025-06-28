@@ -6,6 +6,10 @@ import io
 import boto3
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Previous task EC2 metadata retrieval
 from metadata import get_imds_token, get_instance_identity_document
@@ -139,7 +143,7 @@ async def upload_image(
             )
         except:
             pass
-        
+    
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/images")
