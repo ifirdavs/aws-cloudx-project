@@ -1,0 +1,277 @@
+Parameters:
+  SSHMyIp:
+    Type: String
+    Description: CIDR range allowed to SSH in
+    Default: 195.158.28.2/32
+    AllowedPattern: ^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$
+  myprojectAMI:
+    Type: AWS::EC2::Image::Id
+    Default: ami-0da88288db14f823d
+    Description: AMI ID for the EC2 custom Linux image.
+  myprojectInstanceType:
+    Type: String
+    Description: EC2 instance type for launch template
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3a.micro
+  
+  # RDS Database credentials
+  DBUser:
+    Type: String
+    Default: postgresmaster
+  DBPassword:
+    Type: String
+    Default: postgresmaster
+    NoEcho: true    # sensitive
+  UseIAMAuth:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  DBHost:
+    Type: String
+    Default: rds-fastapi.c0dsm0wyi9o5.us-east-1.rds.amazonaws.com
+  DBPort:
+    Type: String
+    Default: '5432'
+  DBName:
+    Type: String
+    Default: postgres
+
+  # S3 Bucket for app images
+  S3Bucket:
+    Type: String
+    Default: fastapirdsbucket
+  
+  # IAM Instance Profile (Role) Parameter
+  EC2InstanceProfile:
+    Type: String
+    Default: FullS3AndConnectToRDSRole
+    Description: Existing IAM Instance Profile for EC2 instances
+  
+
+Resources:
+
+  ### 1. S3 Bucket
+  # S3Bucket:
+  #   Type: AWS::S3::Bucket
+  #   Properties:
+  #     BucketName: firdavsbekismoilov-bucket1
+
+  ### 2. VPC & Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: myproject-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: myproject-InternetGateway
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true    # Enable public IP assignment
+      Tags:
+        - Key: Name
+          Value: myproject-PublicSubnet-A
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ''
+      MapPublicIpOnLaunch: true    # Enable public IP assignment
+      Tags:
+        - Key: Name
+          Value: myproject-PublicSubnet-B
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: myproject-RouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref RouteTable
+  SubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref RouteTable
+
+  ### 3. EC2 Template ###
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP/HTTPS from anywhere, SSH from my IP only
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHMyIp
+      Tags:
+        - Key: Name
+          Value: myproject-SecGr1
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: myproject-LaunchTemplate
+      LaunchTemplateData:
+        ImageId: !Ref myprojectAMI
+        InstanceType: !Ref myprojectInstanceType
+        SecurityGroupIds:
+          - !Ref SecurityGroup
+        IamInstanceProfile:
+          Name: !Ref EC2InstanceProfile
+        UserData:
+          Fn::Base64: !Sub |
+            #cloud-boothook
+            #!/bin/bash
+            
+            yum update -y
+            
+            # Set environment variables
+            echo "DB_USER=${DBUser}" >> /etc/environment
+            echo "DB_PASSWORD=${DBPassword}" >> /etc/environment
+            echo "USE_IAM_AUTH=${UseIAMAuth}" >> /etc/environment
+            echo "DB_HOST=${DBHost}" >> /etc/environment
+            echo "DB_PORT=${DBPort}" >> /etc/environment
+            echo "DB_NAME=${DBName}" >> /etc/environment
+            echo "S3_BUCKET_NAME=${S3Bucket}" >> /etc/environment
+            
+            mkdir /home/ec2-user/project
+            aws s3 cp s3://firdavsbekbucket1/project/ /home/ec2-user/project --recursive
+            cd /home/ec2-user/project
+            
+            python3 -m venv .venv
+            source .venv/bin/activate
+            pip install -r requirements.txt
+            
+            sudo bash -c "source .venv/bin/activate && nohup uvicorn main:app --host 0.0.0.0 --port 80 > uvicorn.log 2>&1 &"
+      TagSpecifications:
+        - ResourceType: launch-template
+          Tags:
+            - Key: Name
+              Value: myproject-LaunchTemplate
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      MinSize: '2'
+      MaxSize: '3'
+      DesiredCapacity: '2'
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      Tags:
+        - Key: Name
+          Value: myproject-AutoScalingGroup
+          PropagateAtLaunch: true
+  CPUUtilizationScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 50
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: myproject-LoadBalancer
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: myproject-
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: myproject-TargetGroup
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: myproject-TargetGroup
+
+Outputs:
+  # BucketName:
+  #   Description: Name of the S3 bucket
+  #   Value: !Ref S3Bucket
+
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  LoadBalancerDNS:
+    Description: DNS name of the ALB
+    Value: !GetAtt LoadBalancer.DNSName
