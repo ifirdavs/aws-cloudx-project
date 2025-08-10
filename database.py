@@ -12,7 +12,7 @@ DB_PORT = os.environ.get("DB_PORT", "5432")
 DB_NAME = os.environ.get("DB_NAME", "images_db")
 
 DB_REGION = os.environ.get("DB_REGION", "us-east-1")
-USE_IAM_AUTH = os.environ.get("USE_IAM_AUTH", "true").lower() == "true"
+USE_IAM_AUTH = os.environ.get("USE_IAM_AUTH", "false").lower() == "true"
 
 def create_engine_with_iam():
     """Create engine with IAM authentication"""
