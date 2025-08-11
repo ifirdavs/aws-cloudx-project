@@ -81,7 +81,7 @@ async def get_images(
                     "name": image.name,
                     "image_size": image.image_size,
                     "file_extension": image.file_extension,
-                    "last_update": image.last_update
+                    "updated_at": image.updated_at
                 }
             else:
                 # Return image file
@@ -106,7 +106,7 @@ async def get_images(
                     "name": img.name,
                     "image_size": img.image_size,
                     "file_extension": img.file_extension,
-                    "last_update": img.last_update
+                    "updated_at": img.updated_at
                 }
                 for img in images
             ]

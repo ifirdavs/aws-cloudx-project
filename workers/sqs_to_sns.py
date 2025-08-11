@@ -31,18 +31,24 @@ class SQSToSNSWorker:
             f"Download link: {self.base_url}/images?name={payload.get('name')}\n"
         )
 
-    def _loop(self):
+    def _process_queue_until_empty(self):
+        """Process all messages in the queue until it's empty"""
+        messages_processed = 0
+        
         while not self._stop.is_set():
             try:
+                # Short polling - don't wait if no messages
                 resp = sqs.receive_message(
                     QueueUrl=self.queue_url,
                     MaxNumberOfMessages=10,
-                    WaitTimeSeconds=20,
+                    WaitTimeSeconds=1,  # Short wait to check if queue is empty
                     MessageAttributeNames=["All"],
                 )
+                
                 msgs = resp.get("Messages", [])
                 if not msgs:
-                    continue
+                    # Queue is empty, break out of processing loop
+                    break
 
                 deletes = []
                 for m in msgs:
@@ -59,19 +65,43 @@ class SQSToSNSWorker:
                         },
                     )
                     deletes.append({"Id": m["MessageId"], "ReceiptHandle": m["ReceiptHandle"]})
+                    messages_processed += 1
 
                 if deletes:
                     sqs.delete_message_batch(QueueUrl=self.queue_url, Entries=deletes)
+                    log.info(f"Processed batch of {len(deletes)} messages")
 
             except Exception as e:
-                log.exception("SQS worker error: %s", e)
+                log.exception("SQS worker error during processing: %s", e)
                 time.sleep(2)
+        
+        if messages_processed > 0:
+            log.info(f"Finished processing {messages_processed} messages. Queue is now empty.")
+    
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                # Sleep for 20 seconds (or until stop signal)
+                if self._stop.wait(timeout=20.0):
+                    # Stop signal received during sleep
+                    break
+                
+                # After sleep, process queue until empty
+                log.debug("Checking queue for messages...")
+                self._process_queue_until_empty()
+
+            except Exception as e:
+                log.exception("SQS worker error in main loop: %s", e)
+                time.sleep(2)
+
+        log.info("SQS worker loop stopped")
 
     def start(self):
         if self._t and self._t.is_alive():
             return
         self._t = threading.Thread(target=self._loop, name="sqs-to-sns", daemon=True)
         self._t.start()
+        log.info("SQS worker thread started")
 
     def stop(self, timeout: float = 5.0):
         self._stop.set()
