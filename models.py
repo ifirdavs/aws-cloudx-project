@@ -9,4 +9,4 @@ class Image(Base):
     name = Column(String(20), unique=True, index=True)
     image_size = Column(BigInteger)
     file_extension = Column(String(40))
-    last_update = Column(DateTime, default=func.now())
+    uploaded_at = Column(DateTime, default=func.now())
