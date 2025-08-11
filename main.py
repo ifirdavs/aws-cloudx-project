@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Union
 import io
 import boto3
 import os, json
@@ -216,7 +216,7 @@ async def delete_image(
 
 
 # Subscription management endpoints
-def find_subscription_arn_by_email(topic_arn: str, email: str) -> str | None:
+def find_subscription_arn_by_email(topic_arn: str, email: str) -> Union[str, None]:
     """Return SubscriptionArn for the given email (or 'PendingConfirmation') or None."""
     next_token = None
     while True:
