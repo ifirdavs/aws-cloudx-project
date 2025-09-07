@@ -8,13 +8,13 @@ Parameters:
   MyIpAddress:
     Type: String
     Description: CIDR range allowed to SSH in
-    Default: 94.158.60.191/32
+    Default: 94.158.59.70/32
     AllowedPattern: ^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$
   
 
   davisAMI:
     Type: AWS::EC2::Image::Id
-    Default: ami-0de716d6197524dd9    # Quickstart Amazon Linux 2023 kernel-6.1 AMI 
+    Default: ami-00ca32bbc84273381    # Quickstart Amazon Linux 2023 kernel-6.1 AMI 
     Description: AMI ID for the EC2 custom Linux image.
   davisEC2InstanceType:
     Type: String
@@ -28,9 +28,9 @@ Parameters:
     Type: AWS::EC2::KeyPair::KeyName
     Description: EC2 Key Pair for SSH access
     Default: sshkey-windows
-  davisEC2InstanceProfile:    # Instance Profile (Role) for EC2 to access S3, SQS, SNS
+  davisEC2InstanceProfile:    # Instance Profile (Role) for EC2 to access S3, SQS, SNS, and Lambda functions
     Type: String
-    Default: FullS3SqsSnsAccess
+    Default: FullS3SqsSnsLambdaAccess
     Description: Existing IAM Instance Profile for Auto Scaling Group instances
   
 
@@ -54,19 +54,18 @@ Parameters:
     Type: String
     Default: postgres
   
-  AwsRegion:
-    Type: String
-    Default: us-east-1
-  
 
   davisS3Bucket:     # S3 Bucket name for application uploads
     Type: String
     Default: fastapirdsbucket
   
+  sourceCodeS3Bucket:
+    Type: String
+    Default: firdavsbekbucket1
 
 
 Resources:
-  ### 1. VPC & Networking
+###  VPC & Networking  ###
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -137,34 +136,54 @@ Resources:
         - Key: Name
           Value: davis-PrivateSubnet-B
 
-  RouteTable:
+  PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: davis-RouteTable
+          Value: davis-PrivateRouteTable
+  
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: davis-PublicRouteTable
 
   PublicRoute:
     Type: AWS::EC2::Route
     DependsOn: VPCIGWAttachment
     Properties:
-      RouteTableId: !Ref RouteTable
+      RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  SubnetRouteTableAssociationA:
+  PublicSubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetA
-      RouteTableId: !Ref RouteTable
-  SubnetRouteTableAssociationB:
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetBRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetB
-      RouteTableId: !Ref RouteTable
+      RouteTableId: !Ref PublicRouteTable
 
-  ### 3. EC2 Template
+
+###  EC2 Template  ###
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -214,20 +233,21 @@ Resources:
             echo "DB_PORT=${dbport}" >> /etc/environment
             echo "DB_NAME=${dbname}" >> /etc/environment
             echo "S3_BUCKET_NAME=${davisS3Bucket}" >> /etc/environment
-            echo "AWS_REGION=${AwsRegion}" >> /etc/environment
+            echo "AWS_REGION=${AWS::Region}" >> /etc/environment
             echo "SNS_UPLOAD_TOPIC_ARN=${SnsUploadTopic.TopicArn}" >> /etc/environment
             echo "SQS_QUEUE_URL=${SqsQueue.QueueUrl}" >> /etc/environment
             echo "HOST=${LoadBalancer.DNSName}" >> /etc/environment
+            echo "CONSISTENCY_LAMBDA_ARN=${DataConsistencyFunction.Arn}" >> /etc/environment
 
             mkdir /home/ec2-user/project
-            aws s3 cp s3://firdavsbekbucket1/project/ /home/ec2-user/project --recursive
+            aws s3 cp s3://${sourceCodeS3Bucket}/project/ /home/ec2-user/project --recursive
             cd /home/ec2-user/project
             
             python3 -m venv .venv
             source .venv/bin/activate
             pip install -r requirements.txt
 
-            sudo bash -c "source .venv/bin/activate && nohup uvicorn main:app --host 0.0.0.0 --port 80 > uvicorn.log 2>&1 &"
+            sudo bash -c "nohup .venv/bin/uvicorn main:app --host 0.0.0.0 --port 80 > uvicorn.log 2>&1 & sleep 1"
       TagSpecifications:
         - ResourceType: launch-template
           Tags:
@@ -243,9 +263,9 @@ Resources:
       VPCZoneIdentifier:
         - !Ref PublicSubnetA
         - !Ref PublicSubnetB
-      MinSize: '2'
+      MinSize: '1'
       MaxSize: '3'
-      DesiredCapacity: '2'
+      DesiredCapacity: '1'
       TargetGroupARNs:
         - !Ref TargetGroup
       Tags:
@@ -299,7 +319,7 @@ Resources:
         - Key: Name
           Value: davis-TargetGroup
 
-### RDS Database
+###  RDS Database  ###
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -348,7 +368,8 @@ Resources:
         - Key: Name
           Value: davis-rds
 
-### SNS Topic
+  
+###  SNS Topic  ###
   SnsUploadTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -358,7 +379,7 @@ Resources:
         - Key: Name
           Value: davis-UploadsNotificationTopic
 
-### SQS Queue
+###  SQS Queue  ###
   SqsQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -384,6 +405,216 @@ Resources:
           Value: davis-UploadsNotificationQueue-DLQ
 
 
+###  Lambda Functions  ###
+  UploadsNotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: davis-UploadsNotificationFunction
+      Runtime: python3.13
+      Architectures: [ x86_64 ]
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/FullSNSBasicLambda
+      Handler: lambda_function_sqs2sns.lambda_handler          # <module>.<function>
+      Code:
+        S3Bucket: !Ref sourceCodeS3Bucket
+        S3Key: project/lambda_function_sqs2sns.zip
+        # S3ObjectVersion: <optional version id if bucket is versioned>
+      Environment:
+        Variables:
+          # No need for AWS_REGION as it's already reserved and defined automatically based on Lambda region.
+          SNS_UPLOAD_TOPIC_ARN: !GetAtt SnsUploadTopic.TopicArn 
+          HOST: !GetAtt LoadBalancer.DNSName
+      Tags:
+        - Key: Name
+          Value: davis-UploadsNotificationFunction
+
+  SqsEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      FunctionName: !Ref UploadsNotificationFunction
+      EventSourceArn: !GetAtt SqsQueue.Arn
+      BatchSize: 10
+      MaximumBatchingWindowInSeconds: 20
+      Enabled: true
+
+
+  DataConsistencyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: davis-DataConsistencyFunction
+      Runtime: python3.13
+      Architectures: [ x86_64 ]
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/FullS3BasicLambda
+      Handler: lambda_function_consistency.lambda_handler          # <module>.<function>
+      Timeout: 5      # set this based on expected execution time
+      Code:
+        S3Bucket: !Ref sourceCodeS3Bucket
+        S3Key: project/lambda_function_consistency.zip
+      VpcConfig:     # Attach the function to your VPC by specifying subnets & SG
+        SubnetIds:
+          - !Ref PrivateSubnetA
+          - !Ref PrivateSubnetB
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
+      Environment:
+        Variables:
+          DB_HOST: !GetAtt RDSInstance.Endpoint.Address
+          DB_PORT: !Ref dbport
+          DB_USER: !Ref dbuser
+          DB_PASSWORD: !Ref dbpassword
+          DB_NAME: !Ref dbname
+          S3_BUCKET_NAME: !Ref davisS3Bucket
+      Tags:
+        - Key: Name
+          Value: davis-DataConsistencyFunction
+
+  S3GatewayEndpoint:    # For Lambda function in Private Subnets A,B to access S3
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      VpcEndpointType: Gateway
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - !Ref PrivateRouteTable      # Had to create a separate route table for private subnets as there is no built-in !GetAtt VPC.DefaultRouteTable
+
+  EventBridgeScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: davis-DataConsistencyScheduleRule
+      Description: "Run DataConsistencyFunction every 5 minutes"
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: DataConsistencyFunctionTarget
+          Arn: !GetAtt DataConsistencyFunction.Arn
+
+  # Allow EventBridge to invoke the Lambda
+  LambdaPermissionForEventBridgeScheduleRule:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DataConsistencyFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventBridgeScheduleRule.Arn
+
+
+
+  ###  API Gateway  ###
+  DataConsistencyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: davis-DataConsistencyLambda
+      EndpointConfiguration:
+        Types: [REGIONAL]   # Regional endpoint (public IPv4 by default)
+
+  # /check-consistency
+  CheckConsistencyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref DataConsistencyApi
+      ParentId: !GetAtt DataConsistencyApi.RootResourceId
+      PathPart: check-consistency
+
+  # /check-consistency resource POST method
+  PostCheckConsistencyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DataConsistencyApi
+      ResourceId: !Ref CheckConsistencyResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        # Type: AWS_PROXY    # <-- Lambda proxy integration
+        Type: AWS      # <-- non-proxy
+        IntegrationHttpMethod: POST
+        Uri: !Sub >
+          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/
+          ${DataConsistencyFunction.Arn}/invocations
+        Credentials: !GetAtt ApiGatewayInvokeRole.Arn    # <-- REQUIRED for Type: AWS
+        PassthroughBehavior: WHEN_NO_MATCH   # "Request body passthrough (recommended)"
+        RequestTemplates:
+          application/json: |
+            {
+              "detail-type": "APIGatewayInvoke",
+              "requestContext": $input.json('$.requestContext'),
+              "path": "$context.resourcePath",
+              "httpMethod": "$context.httpMethod",
+              "queryStringParameters": $input.json('$.queryStringParameters'),
+              "headers": $input.json('$.headers'),
+              "body": $input.body
+            }
+        # Map Lambda result back to HTTP 200 and return its "body" field
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: $input.json('$.body')
+        TimeoutInMillis: 29000   # max 29s
+      
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+
+  # Deployment + Stage
+  DataConsistencyDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PostCheckConsistencyMethod
+    Properties:
+      RestApiId: !Ref DataConsistencyApi
+      Description: "Deployment for davis-DataConsistencyLambda (non-proxy)"
+
+  DataConsistencyStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref DataConsistencyApi
+      DeploymentId: !Ref DataConsistencyDeployment
+      StageName: prod
+      Description: "Prod stage for DataConsistency API"
+
+  # IAM role that API Gateway assumes for the non-proxy integration
+  ApiGatewayInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "InvokeLambdaRoleForAPIGateway-${AWS::StackName}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: InvokeDataConsistencyLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:InvokeFunctionUrl
+                Resource:
+                  - !GetAtt DataConsistencyFunction.Arn
+                  # allow any version/alias as well:
+                  - !Sub "${DataConsistencyFunction.Arn}:*"
+
+  # Allow API Gateway to invoke the Lambda
+  ApiGatewayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DataConsistencyFunction
+      Principal: apigateway.amazonaws.com
+      # Limit to this API resource only
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${DataConsistencyApi}/*/*/*
+
+
+
+
+
+
+
+
 
 
 
@@ -395,3 +626,11 @@ Outputs:
   LoadBalancerDNS:
     Description: DNS name of the ALB
     Value: !GetAtt LoadBalancer.DNSName
+
+  RDSInstanceEndpoint:
+    Description: RDS instance endpoint
+    Value: !GetAtt RDSInstance.Endpoint.Address
+
+  APIGatewayDataConsistencyLambdaUrl:
+    Description: "Invoke URL for POST /check-consistency"
+    Value: !Sub "https://${DataConsistencyApi}.execute-api.${AWS::Region}.amazonaws.com/${DataConsistencyStage}/check-consistency"
