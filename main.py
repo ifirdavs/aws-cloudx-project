@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional, Union
 import io
@@ -7,18 +7,7 @@ import boto3
 import os, json
 from datetime import datetime
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
-from workers.sqs_to_sns import SQSToSNSWorker
 
-worker = SQSToSNSWorker()
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    worker.start()
-    try:
-        yield
-    finally:
-        worker.stop()
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,11 +22,12 @@ from models import Image
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 SNS_UPLOAD_TOPIC_ARN = os.environ.get("SNS_UPLOAD_TOPIC_ARN")
 SQS_QUEUE_URL = os.environ.get("SQS_QUEUE_URL")
+CONSISTENCY_LAMBDA_ARN = os.environ.get("CONSISTENCY_LAMBDA_ARN")
 
 # S3 Configuration
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
@@ -46,6 +36,9 @@ s3_client = boto3.client('s3', region_name=AWS_REGION)
 # SNS, SQS Client
 sns = boto3.client("sns", region_name=AWS_REGION)
 sqs = boto3.client("sqs", region_name=AWS_REGION)
+
+# Lambda Client
+lambda_client = boto3.client("lambda", region_name=AWS_REGION)
 
 @app.get("/location")
 async def location():
@@ -268,3 +261,22 @@ def unsubscribe(email: str):
 
     sns.unsubscribe(SubscriptionArn=arn)
     return {"status": "unsubscribed", "subscriptionArn": arn}
+
+
+
+## Lambda consistency check
+@app.post("/check-consistency")
+def check_consistency():
+    """Invoke the RDS↔S3 consistency validation Lambda and return its JSON body."""
+
+    resp = lambda_client.invoke(
+        FunctionName=CONSISTENCY_LAMBDA_ARN,
+        InvocationType="RequestResponse",
+        Payload=json.dumps({
+            "detail-type": "WebAppInvoke",
+        }).encode("utf-8"),
+    )
+    payload = json.loads(resp["Payload"].read().decode("utf-8") or "{}")
+    body = json.loads(payload.get("body"))
+
+    return JSONResponse(status_code=payload["statusCode"], content=body)
