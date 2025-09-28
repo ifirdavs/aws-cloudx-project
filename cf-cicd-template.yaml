@@ -406,35 +406,35 @@ Resources:
 
 
 ###  Lambda Functions  ###
-  UploadsNotificationFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: davis-UploadsNotificationFunction
-      Runtime: python3.13
-      Architectures: [ x86_64 ]
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/FullSNSBasicLambda
-      Handler: lambda_function_sqs2sns.lambda_handler          # <module>.<function>
-      Code:
-        S3Bucket: !Ref sourceCodeS3Bucket
-        S3Key: project/lambda_function_sqs2sns.zip
-        # S3ObjectVersion: <optional version id if bucket is versioned>
-      Environment:
-        Variables:
-          # No need for AWS_REGION as it's already reserved and defined automatically based on Lambda region.
-          SNS_UPLOAD_TOPIC_ARN: !GetAtt SnsUploadTopic.TopicArn 
-          HOST: !GetAtt LoadBalancer.DNSName
-      Tags:
-        - Key: Name
-          Value: davis-UploadsNotificationFunction
+  # UploadsNotificationFunction:
+  #   Type: AWS::Lambda::Function
+  #   Properties:
+  #     FunctionName: davis-UploadsNotificationFunction
+  #     Runtime: python3.13
+  #     Architectures: [ x86_64 ]
+  #     Role: !Sub arn:aws:iam::${AWS::AccountId}:role/FullSNSBasicLambda
+  #     Handler: lambda_function_sqs2sns.lambda_handler          # <module>.<function>
+  #     Code:
+  #       S3Bucket: !Ref sourceCodeS3Bucket
+  #       S3Key: project/lambda_function_sqs2sns.zip
+  #       # S3ObjectVersion: <optional version id if bucket is versioned>
+  #     Environment:
+  #       Variables:
+  #         # No need for AWS_REGION as it's already reserved and defined automatically based on Lambda region.
+  #         SNS_UPLOAD_TOPIC_ARN: !GetAtt SnsUploadTopic.TopicArn
+  #         HOST: !GetAtt LoadBalancer.DNSName
+  #     Tags:
+  #       - Key: Name
+  #         Value: davis-UploadsNotificationFunction
 
-  SqsEventSourceMapping:
-    Type: AWS::Lambda::EventSourceMapping
-    Properties:
-      FunctionName: !Ref UploadsNotificationFunction
-      EventSourceArn: !GetAtt SqsQueue.Arn
-      BatchSize: 10
-      MaximumBatchingWindowInSeconds: 20
-      Enabled: true
+  # SqsEventSourceMapping:
+  #   Type: AWS::Lambda::EventSourceMapping
+  #   Properties:
+  #     FunctionName: !Ref UploadsNotificationFunction
+  #     EventSourceArn: !GetAtt SqsQueue.Arn
+  #     BatchSize: 10
+  #     MaximumBatchingWindowInSeconds: 20
+  #     Enabled: true
 
 
   DataConsistencyFunction:

@@ -1,0 +1,25 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.13
+    commands:
+      - pip install --upgrade awscli
+      - pip install --upgrade --user aws-sam-cli
+      - export PATH="$PATH:/root/.local/bin"
+  pre_build:
+    commands:
+      - sam --version
+      - sam validate --lint -t samLambda/samTemplate.yaml
+  build:
+    commands:
+      - echo "Packaging SAM template..."
+      - sam package --template-file samLambda/samTemplate.yaml --s3-bucket firdavsbekbucket1 --s3-prefix project/sam-artifacts --output-template-file packagedSamTemplate.yaml
+  post_build:
+    commands:
+      - echo "Build & package completed packagedSamTemplate.yaml"
+
+artifacts:
+  files:
+    - packagedSamTemplate.yaml

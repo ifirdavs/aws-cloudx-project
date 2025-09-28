@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM app for <ProjectName>-UploadsNotificationFunction with canary deployments
+
+Parameters:
+  SnsUploadTopicArn:
+    Type: String
+    Default: arn:aws:sns:us-east-1:982081070222:davis-UploadsNotificationTopic
+  LoadBalancerDNSName:
+    Type: String
+    Default: davis-LoadBalancer-37056149.us-east-1.elb.amazonaws.com
+  SqsQueueArn:
+    Type: String
+    Default: arn:aws:sqs:us-east-1:982081070222:davis-UploadsNotificationQueue
+
+Resources:
+  UploadsNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: davis-UploadsNotificationFunction
+      Runtime: python3.13
+      Architectures: [ x86_64 ]
+      Handler: lambda_function_sqs2sns.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/FullSNSBasicLambda
+      CodeUri: ./src     # SAM zips & uploads to S3
+      Environment:
+        Variables:
+          SNS_UPLOAD_TOPIC_ARN: !Ref SnsUploadTopicArn
+          HOST: !Ref LoadBalancerDNSName
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref SqsQueueArn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 20
+            Enabled: true
+
+      # Required by SAM to enable deployment preferences (CodeDeploy)
+      AutoPublishAlias: live
+      DeploymentPreference:
+        Type: Canary10Percent5Minutes
+
+    # (Optional but helpful) tag
+    Metadata:
+      Tags:
+        Name: davis-UploadsNotificationFunction
+
+Outputs:
+  FunctionName:
+    Value: !Ref UploadsNotificationFunction
+  FunctionAliasArn:
+    Value: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:davis-UploadsNotificationFunction:live
