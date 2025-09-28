@@ -526,9 +526,8 @@ Resources:
         # Type: AWS_PROXY    # <-- Lambda proxy integration
         Type: AWS      # <-- non-proxy
         IntegrationHttpMethod: POST
-        Uri: !Sub >
-          arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/
-          ${DataConsistencyFunction.Arn}/invocations
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DataConsistencyFunction.Arn}/invocations
+        # arn:aws:lambda:us-east-1:982081070222:function:davis-DataConsistencyFunction
         Credentials: !GetAtt ApiGatewayInvokeRole.Arn    # <-- REQUIRED for Type: AWS
         PassthroughBehavior: WHEN_NO_MATCH   # "Request body passthrough (recommended)"
         RequestTemplates:
@@ -575,7 +574,7 @@ Resources:
   ApiGatewayInvokeRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "InvokeLambdaRoleForAPIGateway-${AWS::StackName}"
+      RoleName: !Sub "InvokeLambdaRoleForAPIGateway"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
