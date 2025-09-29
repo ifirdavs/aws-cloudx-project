@@ -22,6 +22,7 @@ def _build_plaintext(payload: dict) -> str:
         f"Download link: {HOST}/images?name={payload.get('name')}\n"
     )
 
+# Change to test the CodePipeline deployment
 def lambda_handler(event, context):
     """
     Processes SQS records → publishes one SNS message per record.
